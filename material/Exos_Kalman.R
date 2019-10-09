@@ -1,0 +1,170 @@
+
+library(astsa)
+
+# Exercise of pages 13 in the lecture
+y <- c(-0.05, -1.9,-1.9,1.77,-0.22,0.3,2.00,2.45,1.92,3.75)
+num <- 10
+mu0 = 0; sigma0 = 1;  phi = 1; cQ = 1; cR = 1   
+ks = Ksmooth0(num, y, 1, mu0, sigma0, phi, cQ, cR)  
+vec<- cbind(y,ks$xp[1,1,],ks$Pp[1,1,],ks$xf[1,1,],ks$Pf[1,1,],ks$xs[1,1,],ks$Ps[1,1,])   
+colnames(vec)<- c("y","mut_t-1","Pt_t-1","mut_t","Pt_t","mut_n","Pt_n")
+vec
+
+
+
+
+# Example 6.5
+##  example 2.8 p.40-41 (Moulines); example 6.5 p.301-302 SS
+
+
+# generate data 
+set.seed(1)  
+num = 50
+w = rnorm(num+1,0,1)
+v = rnorm(num,0,1)
+
+mu = cumsum(w)  # states:  mu[0], mu[1], . . ., mu[50] 
+y = mu[-1] + v  # obs:  y[1], . . ., y[50]
+
+# filter and smooth (Ksmooth0 does both)
+mu0 = 0; sigma0 = 1;  phi = 1; cQ = 1; cR = 1   
+ks = Ksmooth0(num, y, 1, mu0, sigma0, phi, cQ, cR)   
+
+# pictures 
+par(mfrow=c(3,1))
+Time = 1:num
+
+plot(Time, mu[-1], main="Prediction", ylim=c(-5,10))      
+lines(ks$xp)
+lines(ks$xp+2*sqrt(ks$Pp), lty="dashed", col="blue")
+lines(ks$xp-2*sqrt(ks$Pp), lty="dashed", col="blue")
+
+plot(Time, mu[-1], main="Filter", ylim=c(-5,10))
+lines(ks$xf)
+lines(ks$xf+2*sqrt(ks$Pf), lty="dashed", col="blue") 
+lines(ks$xf-2*sqrt(ks$Pf), lty="dashed", col="blue")
+
+plot(Time, mu[-1],  main="Smoother", ylim=c(-5,10))
+lines(ks$xs)
+lines(ks$xs+2*sqrt(ks$Ps), lty="dashed", col="blue")
+lines(ks$xs-2*sqrt(ks$Ps), lty="dashed", col="blue") 
+
+mu[1]; ks$x0n; sqrt(ks$P0n)   # initial value info
+
+#  perso Table exo 2.8 p.40-41 (Moulines); example 6.5 p.301-302 SS
+vec<- cbind(y,mu[-1],ks$xp[1,1,],ks$Pp[1,1,],ks$xf[1,1,],ks$Pf[1,1,],ks$xs[1,1,],ks$Ps[1,1,])   #perso
+colnames(vec)<- c("y","mu","mut_t-1","Pt_t-1","mut_t","Pt_t","mut_n","Pt_n")
+vec[1:10,]
+
+# In c][]ase you can't] see the differences in the figures...
+# ... either get new glasses or ... 
+# ... plot them on the same graph (not shown)
+dev.new()
+plot(Time, mu[-1], type='n')
+abline(v=Time, lty=3, col=8)
+abline(h=-1:5, lty=3, col=8)
+lines(ks$xp, col=4, lwd=5)
+lines(ks$xf, col=3, lwd=5) 
+lines(ks$xs, col=2, lwd=5)
+points(Time, mu[-1], pch=19, cex=1.5)
+names = c("predictor","filter","smoother")
+legend("bottomright", names, col=4:2, lwd=5, lty=1, bg="white")
+
+par(mfrow=c(1,1))
+
+
+# Example 6.7
+# Newton-Raphson for the Global temperature deviation
+
+# Setup 
+y = cbind(globtemp, globtempl)
+num = nrow(y)
+input = rep(1,num)
+A = array(rep(1,2), dim=c(2,1,num))
+mu0 = -.35; Sigma0 = 1;  Phi = 1
+
+
+# Function to Calculate Likelihood 
+Linn=function(para){
+  cQ = para[1]      # sigma_w
+  cR1 = para[2]    # 11 element of chol(R)
+  cR2 = para[3]    # 22 element of chol(R)
+  cR12 = para[4]   # 12 element of chol(R)
+  cR = matrix(c(cR1,0,cR12,cR2),2)  # put the matrix together
+  drift = para[5]
+  kf = Kfilter1(num,y,A,mu0,Sigma0,Phi,drift,0,cQ,cR,input)
+  return(kf$like) 
+}
+
+# Estimation
+init.par = c(.1,.1,.1,0,.05)  # initial values of parameters
+(est = optim(init.par, Linn, NULL, method="BFGS", hessian=TRUE, control=list(trace=1,REPORT=1))) 
+SE = sqrt(diag(solve(est$hessian))) 
+
+# Summary of estimation  
+estimate = est$par; u = cbind(estimate, SE)
+rownames(u)=c("sigw","cR11", "cR22", "cR12", "drift"); u  
+
+# Smooth (first set parameters to their final estimates)
+cQ    = est$par[1]  
+cR1  = est$par[2]   
+cR2  = est$par[3]   
+cR12 = est$par[4]  
+cR    = matrix(c(cR1,0,cR12,cR2), 2)
+(R    = t(cR)%*%cR)    #  to view the estimated R matrix
+drift = est$par[5]  
+ks    = Ksmooth1(num,y,A,mu0,Sigma0,Phi,drift,0,cQ,cR,input)  
+
+# Plot 
+xsm  = ts(as.vector(ks$xs), start=1880)
+rmse = ts(sqrt(as.vector(ks$Ps)), start=1880)
+plot(xsm, ylim=c(-.6, 1), ylab='Temperature Deviations')
+xx = c(time(xsm), rev(time(xsm)))
+yy = c(xsm-2*rmse, rev(xsm+2*rmse))
+polygon(xx, yy, border=NA, col=gray(.6, alpha=.25))
+lines(globtemp, type='o', pch=2, col=4, lty=6)
+lines(globtempl, type='o', pch=3, col=3, lty=6)
+
+
+# Example 6.9
+# Longitudinal biomedical data
+# Missing data example
+
+y    = cbind(WBC, PLT, HCT)
+num  = nrow(y)       
+A    = array(0, dim=c(3,3,num))  # creates num 3x3 zero matrices
+for(k in 1:num) if (y[k,1] > 0) A[,,k]= diag(1,3)
+plot(WBC,type="l")
+
+# Initial values 
+mu0    = matrix(0,3,1) 
+Sigma0 = diag(c(.1,.1,1) ,3)
+Phi    = diag(1,3)
+cQ     = diag(c(.1,.1,1), 3)
+cR     = diag(c(.1,.1,1), 3)  
+(em = EM1(num, y, A, mu0, Sigma0, Phi, cQ, cR, 100, .001))    
+
+# Graph smoother
+ks  = Ksmooth1(num, y, A, em$mu0, em$Sigma0, em$Phi, 0, 0, chol(em$Q), chol(em$R), 0)
+y1s = ks$xs[1,,] 
+y2s = ks$xs[2,,] 
+y3s = ks$xs[3,,]
+p1  = 2*sqrt(ks$Ps[1,1,]) 
+p2  = 2*sqrt(ks$Ps[2,2,]) 
+p3  = 2*sqrt(ks$Ps[3,3,])
+par(mfrow=c(3,1))
+tsplot(WBC, type='p', pch=19, ylim=c(1,5), xlab='day')
+lines(y1s) 
+lines(y1s+p1, lty=2, col=4) 
+lines(y1s-p1, lty=2, col=4)
+tsplot(PLT, type='p', ylim=c(3,6), pch=19, xlab='day')
+lines(y2s)
+lines(y2s+p2, lty=2, col=4)
+lines(y2s-p2, lty=2, col=4)
+tsplot(HCT, type='p', pch=19, ylim=c(20,40), xlab='day')
+lines(y3s)
+lines(y3s+p3, lty=2, col=4) 
+lines(y3s-p3, lty=2, col=4)
+
+
+
